@@ -31,7 +31,7 @@ def _resolve_cache_dir(config, override: str | None) -> Path:
 
 def _build_text_encoder(config, model_dir: Path, context_len: int, device: str, dtype: torch.dtype):
     backbone_type = getattr(config.backbone, "type", None)
-    if backbone_type in {"wan22", "wan2.2", "wan"}:
+    if backbone_type in {"wan22", "wan22_5b", "wan2.2", "wan"}:
         return Wan22TextEncoder(
             ckpt_path=str(model_dir / "models_t5_umt5-xxl-enc-bf16.pth"),
             tokenizer_path=str(model_dir / "google" / "umt5-xxl"),
