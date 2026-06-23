@@ -1,0 +1,420 @@
+# LIBERO Examples
+
+This document describes the LIBERO workflow for StarWAM: environment setup, recipe placeholders, preprocessing, training, and rollout/evaluation.
+
+The generic StarWAM package documentation is in the repository root [README.md](../../README.md).
+
+## 1. Environment
+
+Use one Conda environment for training and LIBERO rollout.
+
+```bash
+conda create -n starwam-libero python=3.11 -y
+conda activate starwam-libero
+
+# Install the PyTorch wheel matching your CUDA setup.
+pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 \
+  --index-url https://download.pytorch.org/whl/cu124
+
+pip install -r examples/libero/requirements.txt
+pip install flash-attn --no-build-isolation
+pip install -e .
+```
+
+Install LIBERO from source in the same environment:
+
+```bash
+git clone https://github.com/Lifelong-Robot-Learning/LIBERO.git
+cd LIBERO && pip install -e . --no-deps
+```
+
+Notes:
+
+- `--no-deps` avoids changing versions pinned by `examples/libero/requirements.txt`.
+- Install a CUDA/PyTorch-compatible `flash-attn` version if the default one fails.
+- On headless servers, set `export MUJOCO_GL=egl` if rendering fails.
+- Launch scripts default to `CONDA_ENV=starwam-libero`.
+
+## 2. Recipes
+
+Current LIBERO recipes are under:
+
+```text
+examples/libero/configs/recipes/
+```
+
+| Recipe | Model family | Backbone | Notes |
+| --- | --- | --- | --- |
+| `starwam_libero_mot_wan22_5b.yaml` | `mot_wam` | Wan2.2-TI2V-5B | Fast-WAM-aligned MoT recipe. Requires a preprocessed ActionDiT init payload. |
+| `starwam_libero_mot_cosmos_predict2.yaml` | `mot_wam` | Cosmos-Predict2-2B-Video2World | MoT recipe with Cosmos-Predict2 backbone. Requires a preprocessed Cosmos ActionDiT init payload. |
+| `starwam_libero_shared_dit_wan22_5b.yaml` | `shared_dit_wam` | Wan2.2-TI2V-5B | Shared-DiT/register-token recipe with decoupled video/action inference steps. |
+
+### Download data and backbones
+
+```bash
+pip install -U "huggingface_hub[cli]"
+
+# LIBERO LeRobot datasets
+hf download IPEC-COMMUNITY/libero_spatial_no_noops_1.0.0_lerobot --repo-type dataset --local-dir /path/to/libero_spatial_lerobot
+hf download IPEC-COMMUNITY/libero_object_no_noops_1.0.0_lerobot  --repo-type dataset --local-dir /path/to/libero_object_lerobot
+hf download IPEC-COMMUNITY/libero_goal_no_noops_1.0.0_lerobot    --repo-type dataset --local-dir /path/to/libero_goal_lerobot
+hf download IPEC-COMMUNITY/libero_10_no_noops_1.0.0_lerobot      --repo-type dataset --local-dir /path/to/libero_10_lerobot
+
+# Backbones
+hf download Wan-AI/Wan2.2-TI2V-5B --local-dir /path/to/Wan2.2-TI2V-5B
+hf download nvidia/Cosmos-Predict2-2B-Video2World --local-dir /path/to/Cosmos-Predict2-2B-Video2World
+```
+
+Set `data.dataset_dirs` to the four LIBERO dirs above, and set `backbone.pretrained_model_id` to the selected backbone dir.
+
+## 3. Paths you must set
+
+The release recipes use placeholder paths. Before running training or rollout, replace them in the YAML file or pass values through `--override`.
+
+| Field | Required for | What to set |
+| --- | --- | --- |
+| `backbone.pretrained_model_id` | all recipes | Local Wan2.2 or Cosmos-Predict2 checkpoint directory. Download/prepare this yourself. |
+| `framework.action_expert_init_from` | Wan2.2 MoT and Cosmos-Predict2 MoT | Output of Section 5.1 (`preprocess_action_dit_init`). Not needed for Shared-DiT. |
+| `training.output_dir` | all recipes | Run output directory. Checkpoints, logs, stats, and caches are written here. |
+| `data.dataset_dirs` | all real LIBERO runs | LeRobot-format LIBERO dataset dirs. Set in YAML or pass a quoted list through `--override`. |
+| `data.text_embedding_cache_dir` | all real LIBERO runs | Text embedding cache dir. Training creates missing caches; Wan users may also precompute via Section 5.2. |
+| `data.action_stats_path` | normalized-action recipes | Action stats JSON. Created from `data.dataset_dirs` if missing. |
+| `data.state_stats_path` | normalized-state recipes | State/proprio stats JSON. Can share the same file as `data.action_stats_path`. |
+
+The `--override` parser supports scalar `key=value` overrides and quoted Python/JSON-style lists.
+
+Example overrides:
+
+```bash
+--override \
+  'data.dataset_dirs=["/path/to/libero_spatial_lerobot","/path/to/libero_object_lerobot","/path/to/libero_goal_lerobot","/path/to/libero_10_lerobot"]' \
+  backbone.pretrained_model_id=/path/to/Wan2.2-TI2V-5B \
+  framework.action_expert_init_from=/path/to/preprocessed/starwam_action_dit_init_wan22.pt \
+  training.output_dir=/path/to/output/starwam_libero_mot_wan22_5b \
+  data.text_embedding_cache_dir=/path/to/output/starwam_libero_mot_wan22_5b/text_embedding_cache \
+  data.action_stats_path=/path/to/output/starwam_libero_mot_wan22_5b/action_stats.json \
+  data.state_stats_path=/path/to/output/starwam_libero_mot_wan22_5b/action_stats.json \
+  training.wandb_enabled=false
+```
+
+## 4. Data format
+
+StarWAM expects LIBERO training data in LeRobot-style episode format. Recipes use fields such as:
+
+- RGB video observations, optionally from multiple cameras;
+- low-dimensional actions;
+- optional robot proprio/state;
+- task language descriptions;
+- precomputed T5 text embeddings.
+
+Typical LIBERO settings:
+
+```yaml
+data:
+  dataset_type: lerobot
+  dataset_dirs:
+    - /path/to/libero_spatial_lerobot
+    - /path/to/libero_object_lerobot
+    - /path/to/libero_goal_lerobot
+    - /path/to/libero_10_lerobot
+  video_keys:
+    - observation.images.image
+    - observation.images.wrist_image
+  concat_multi_camera: horizontal
+  action_key: action
+  state_key: observation.state
+  num_frames: 33
+  action_freq_ratio: 4
+  normalize_actions: true
+  action_norm_mode: minmax
+  normalize_states: true
+  state_norm_mode: minmax
+```
+
+For code-only smoke tests, use `data.dataset_type: synthetic`. This uses dummy samples and is not for real training/evaluation.
+
+## 5. Preprocessing
+
+### 5.1 ActionDiT initialization for MoT WAM
+
+For Wan2.2 and Cosmos-Predict2 MoT, `framework.action_expert_init_from` is not a downloaded checkpoint. It is generated from the selected video DiT weights once before training. Both recipes still use the generic token-action `ActionDiT`; Cosmos-Predict2 uses a best-effort structural mapping from Cosmos transformer weights rather than a separate `cosmos_action_dit` implementation.
+
+Wan2.2:
+
+```bash
+python -m starwam.tools.preprocess_action_dit_init \
+  --config examples/libero/configs/recipes/starwam_libero_mot_wan22_5b.yaml \
+  --source-backbone wan22 \
+  --pretrained-model-id /path/to/Wan2.2-TI2V-5B \
+  --output /path/to/preprocessed/starwam_action_dit_init_wan22.pt \
+  --device cuda:0 \
+  --dtype bfloat16
+```
+
+Cosmos-Predict2:
+
+```bash
+python -m starwam.tools.preprocess_action_dit_init \
+  --config examples/libero/configs/recipes/starwam_libero_mot_cosmos_predict2.yaml \
+  --source-backbone cosmos_predict2 \
+  --pretrained-model-id /path/to/Cosmos-Predict2-2B-Video2World \
+  --output /path/to/preprocessed/starwam_action_dit_init_cosmos_predict2_notimeproj.pt \
+  --device cpu \
+  --dtype bfloat16
+```
+
+Set the generated path in YAML or pass `--override framework.action_expert_init_from=/path/to/preprocessed/<payload>.pt`. Not needed for Shared-DiT.
+
+### 5.2 Text embedding cache
+
+Text embeddings are cache files generated from LIBERO task language. Training creates missing caches automatically. For Wan2.2 recipes, you can also precompute them explicitly:
+
+```bash
+python -m starwam.tools.precompute_text_cache \
+  --config examples/libero/configs/recipes/starwam_libero_mot_wan22_5b.yaml \
+  --pretrained-model-id /path/to/Wan2.2-TI2V-5B \
+  --output-dir /path/to/output/starwam_libero_mot_wan22_5b/text_embedding_cache \
+  --device cuda:0 \
+  --dtype bf16 \
+  --override 'data.dataset_dirs=["/path/to/libero_spatial_lerobot","/path/to/libero_object_lerobot","/path/to/libero_goal_lerobot","/path/to/libero_10_lerobot"]'
+```
+
+Use separate cache dirs for Wan and Cosmos. Their `data.text_cache_encoder_id` values are already set in the recipes.
+
+### 5.3 Action/state normalization stats
+
+If `data.normalize_actions=true` or `data.normalize_states=true`, the training dataset builder loads stats from the configured JSON path. If the file does not exist, it computes the stats from `data.dataset_dirs` and writes the JSON file.
+
+Recommended setup:
+
+```yaml
+data:
+  action_stats_path: /path/to/output/<run_name>/action_stats.json
+  state_stats_path: /path/to/output/<run_name>/action_stats.json
+```
+
+Using the same JSON for action and state stats is supported; the file stores separate `action` and `state` entries.
+
+## 6. Training
+
+### 6.1 Wan2.2 MoT WAM
+
+Run the ActionDiT preprocessing in Section 5.1, then launch training:
+
+```bash
+accelerate launch \
+  --config_file configs/accelerate/deepspeed_zero2.yaml \
+  -m starwam.training.train \
+  --config examples/libero/configs/recipes/starwam_libero_mot_wan22_5b.yaml \
+  --override \
+    'data.dataset_dirs=["/path/to/libero_spatial_lerobot","/path/to/libero_object_lerobot","/path/to/libero_goal_lerobot","/path/to/libero_10_lerobot"]' \
+    backbone.pretrained_model_id=/path/to/Wan2.2-TI2V-5B \
+    framework.action_expert_init_from=/path/to/preprocessed/starwam_action_dit_init_wan22.pt \
+    training.output_dir=/path/to/output/starwam_libero_mot_wan22_5b \
+    data.text_embedding_cache_dir=/path/to/output/starwam_libero_mot_wan22_5b/text_embedding_cache \
+    data.action_stats_path=/path/to/output/starwam_libero_mot_wan22_5b/action_stats.json \
+    data.state_stats_path=/path/to/output/starwam_libero_mot_wan22_5b/action_stats.json \
+    training.wandb_enabled=false
+```
+
+### 6.2 Cosmos-Predict2 MoT WAM
+
+Launch training:
+
+```bash
+accelerate launch \
+  --config_file configs/accelerate/deepspeed_zero2.yaml \
+  -m starwam.training.train \
+  --config examples/libero/configs/recipes/starwam_libero_mot_cosmos_predict2.yaml \
+  --override \
+    'data.dataset_dirs=["/path/to/libero_spatial_lerobot","/path/to/libero_object_lerobot","/path/to/libero_goal_lerobot","/path/to/libero_10_lerobot"]' \
+    backbone.pretrained_model_id=/path/to/Cosmos-Predict2-2B-Video2World \
+    framework.action_expert_init_from=/path/to/preprocessed/starwam_action_dit_init_cosmos_predict2_notimeproj.pt \
+    training.output_dir=/path/to/output/starwam_libero_mot_cosmos_predict2 \
+    data.text_embedding_cache_dir=/path/to/output/starwam_libero_mot_cosmos_predict2/text_embedding_cache \
+    data.action_stats_path=/path/to/output/starwam_libero_mot_cosmos_predict2/action_stats.json \
+    data.state_stats_path=/path/to/output/starwam_libero_mot_cosmos_predict2/action_stats.json \
+    training.wandb_enabled=false
+```
+
+### 6.3 Wan2.2 Shared-DiT WAM
+
+Launch training:
+
+```bash
+accelerate launch \
+  --config_file configs/accelerate/deepspeed_zero2.yaml \
+  -m starwam.training.train \
+  --config examples/libero/configs/recipes/starwam_libero_shared_dit_wan22_5b.yaml \
+  --override \
+    'data.dataset_dirs=["/path/to/libero_spatial_lerobot","/path/to/libero_object_lerobot","/path/to/libero_goal_lerobot","/path/to/libero_10_lerobot"]' \
+    backbone.pretrained_model_id=/path/to/Wan2.2-TI2V-5B \
+    training.output_dir=/path/to/output/starwam_libero_shared_dit_wan22_5b \
+    data.text_embedding_cache_dir=/path/to/output/starwam_libero_shared_dit_wan22_5b/text_embedding_cache \
+    data.action_stats_path=/path/to/output/starwam_libero_shared_dit_wan22_5b/action_stats.json \
+    data.state_stats_path=/path/to/output/starwam_libero_shared_dit_wan22_5b/action_stats.json \
+    training.wandb_enabled=false
+```
+
+### 6.4 Launch scripts
+
+Convenience scripts are provided in:
+
+```text
+examples/libero/scripts/
+```
+
+Current scripts:
+
+```text
+launch_starwam_libero_mot_wan22_5b_8gpu.sh
+launch_starwam_libero_shared_dit_wan22_5b_8gpu.sh
+launch_starwam_libero_mot_rollout.sh
+```
+
+Before running them, edit recipe paths or pass overrides through environment variables:
+
+```bash
+cd /path/to/starWAM
+
+export CONDA_ENV=starwam-libero
+export REPO_DIR=/path/to/starWAM
+export TRAIN_OVERRIDES='data.dataset_dirs=["/path/to/libero_spatial_lerobot","/path/to/libero_object_lerobot","/path/to/libero_goal_lerobot","/path/to/libero_10_lerobot"] backbone.pretrained_model_id=/path/to/Wan2.2-TI2V-5B framework.action_expert_init_from=/path/to/preprocessed/starwam_action_dit_init_wan22.pt training.output_dir=/path/to/output/starwam_libero_mot_wan22_5b data.text_embedding_cache_dir=/path/to/output/starwam_libero_mot_wan22_5b/text_embedding_cache data.action_stats_path=/path/to/output/starwam_libero_mot_wan22_5b/action_stats.json data.state_stats_path=/path/to/output/starwam_libero_mot_wan22_5b/action_stats.json training.wandb_enabled=false'
+
+bash examples/libero/scripts/launch_starwam_libero_mot_wan22_5b_8gpu.sh
+```
+
+## 7. Checkpoints
+
+Training writes checkpoints under:
+
+```text
+${training.output_dir}/checkpoint-<step>/
+```
+
+The rollout script can load:
+
+- a checkpoint directory containing `model.pt`, `pytorch_model.bin`, or safetensors files;
+- a direct checkpoint file;
+- Accelerate/DeepSpeed checkpoint layouts handled by the loader.
+
+If `--checkpoint` is omitted, rollout searches for the latest `checkpoint-*` under `training.output_dir`.
+
+## 8. Rollout / Evaluation
+
+### 8.1 Wan2.2 MoT rollout
+
+```bash
+python examples/libero/rollout.py \
+  --config examples/libero/configs/recipes/starwam_libero_mot_wan22_5b.yaml \
+  --checkpoint /path/to/output/starwam_libero_mot_wan22_5b/checkpoint-20000 \
+  --task-suite-name libero_spatial \
+  --num-trials 50 \
+  --num-inference-steps 8 \
+  --replan-steps 10 \
+  --device cuda:0 \
+  --libero-home /path/to/LIBERO \
+  --override \
+    backbone.pretrained_model_id=/path/to/Wan2.2-TI2V-5B \
+    framework.action_expert_init_from=/path/to/preprocessed/starwam_action_dit_init_wan22.pt \
+    training.output_dir=/path/to/output/starwam_libero_mot_wan22_5b \
+    data.text_embedding_cache_dir=/path/to/output/starwam_libero_mot_wan22_5b/text_embedding_cache \
+    data.action_stats_path=/path/to/output/starwam_libero_mot_wan22_5b/action_stats.json \
+    data.state_stats_path=/path/to/output/starwam_libero_mot_wan22_5b/action_stats.json
+```
+
+### 8.2 Cosmos-Predict2 MoT rollout
+
+```bash
+python examples/libero/rollout.py \
+  --config examples/libero/configs/recipes/starwam_libero_mot_cosmos_predict2.yaml \
+  --checkpoint /path/to/output/starwam_libero_mot_cosmos_predict2/checkpoint-20000 \
+  --task-suite-name libero_spatial \
+  --num-trials 50 \
+  --num-inference-steps 8 \
+  --replan-steps 10 \
+  --device cuda:0 \
+  --libero-home /path/to/LIBERO \
+  --override \
+    backbone.pretrained_model_id=/path/to/Cosmos-Predict2-2B-Video2World \
+    framework.action_expert_init_from=/path/to/preprocessed/starwam_action_dit_init_cosmos_predict2_notimeproj.pt \
+    training.output_dir=/path/to/output/starwam_libero_mot_cosmos_predict2 \
+    data.text_embedding_cache_dir=/path/to/output/starwam_libero_mot_cosmos_predict2/text_embedding_cache \
+    data.action_stats_path=/path/to/output/starwam_libero_mot_cosmos_predict2/action_stats.json \
+    data.state_stats_path=/path/to/output/starwam_libero_mot_cosmos_predict2/action_stats.json
+```
+
+### 8.3 Wan2.2 Shared-DiT rollout
+
+Shared-DiT supports decoupled video/action denoising step counts. Pass both values explicitly:
+
+```bash
+python examples/libero/rollout.py \
+  --config examples/libero/configs/recipes/starwam_libero_shared_dit_wan22_5b.yaml \
+  --checkpoint /path/to/output/starwam_libero_shared_dit_wan22_5b/checkpoint-50000 \
+  --task-suite-name libero_spatial \
+  --num-trials 50 \
+  --num-inference-steps 16 \
+  --action-num-inference-steps 16 \
+  --replan-steps 10 \
+  --device cuda:0 \
+  --libero-home /path/to/LIBERO \
+  --override \
+    backbone.pretrained_model_id=/path/to/Wan2.2-TI2V-5B \
+    training.output_dir=/path/to/output/starwam_libero_shared_dit_wan22_5b \
+    data.text_embedding_cache_dir=/path/to/output/starwam_libero_shared_dit_wan22_5b/text_embedding_cache \
+    data.action_stats_path=/path/to/output/starwam_libero_shared_dit_wan22_5b/action_stats.json \
+    data.state_stats_path=/path/to/output/starwam_libero_shared_dit_wan22_5b/action_stats.json
+```
+
+### 8.4 Rollout launcher and outputs
+
+Use `examples/libero/scripts/launch_starwam_libero_mot_rollout.sh` to evaluate one recipe across multiple LIBERO suites. Set `CHECKPOINT` to either a checkpoint directory or a direct checkpoint file. Direct DeepSpeed `.pt` files are supported; the loader reads `model_state_dict`, `module`, or `state_dict` payloads.
+
+```bash
+cd /path/to/starWAM
+
+export CONDA_ENV=starwam-libero
+export REPO_DIR=/path/to/starWAM
+export RECIPE=examples/libero/configs/recipes/starwam_libero_mot_cosmos_predict2.yaml
+export CHECKPOINT=/path/to/output/starwam_libero_mot_cosmos_predict2/checkpoint-20000/pytorch_model/mp_rank_00_model_states.pt
+export LIBERO_HOME=/path/to/LIBERO
+export RUN_ALL_SUITES=1
+export PARALLEL_SUITES=1
+export NUM_TRIALS=50
+export NUM_STEPS_WAIT=30
+export REPLAN_STEPS=10
+export NUM_INFERENCE_STEPS=8
+export SUITE_GPUS="0 1 2 3"
+export ROLLOUT_OVERRIDES='data.dataset_dirs=["/path/to/libero_spatial_lerobot","/path/to/libero_object_lerobot","/path/to/libero_goal_lerobot","/path/to/libero_10_lerobot"] backbone.pretrained_model_id=/path/to/Cosmos-Predict2-2B-Video2World framework.action_expert_init_from=/path/to/preprocessed/starwam_action_dit_init_cosmos_predict2_notimeproj.pt training.output_dir=/path/to/output/starwam_libero_mot_cosmos_predict2 data.text_embedding_cache_dir=/path/to/output/starwam_libero_mot_cosmos_predict2/text_embedding_cache data.action_stats_path=/path/to/output/starwam_libero_mot_cosmos_predict2/action_stats.json data.state_stats_path=/path/to/output/starwam_libero_mot_cosmos_predict2/action_stats.json'
+
+bash examples/libero/scripts/launch_starwam_libero_mot_rollout.sh
+```
+
+Useful rollout options:
+
+```bash
+--libero-home /path/to/LIBERO
+--output-dir /path/to/rollout_outputs
+--save-video
+--fixed-seed
+```
+
+With `--save-video --output-dir /path/to/rollout_outputs`, videos are written to `/path/to/rollout_outputs/videos/`. Without `--output-dir`, videos are written under `${training.output_dir}/libero_rollout/<checkpoint-name>/<task-suite-name>/videos/`. Rollout videos save one frame per executed environment step after the initial wait period.
+
+The rollout script loads the recipe/checkpoint, applies overrides, builds the model, and repeatedly calls `model.infer_action(...)` in LIBERO.
+
+## 9. Decoupled action steps
+
+MoT WAM uses a single denoising schedule for action rollout. For MoT recipes, `examples/libero/rollout.py` overrides `action_num_inference_steps` to match `num_inference_steps`, so `inference.action_num_inference_steps` is kept only for schema consistency.
+
+Shared-DiT uses decoupled step counts, so rollout passes `--action-num-inference-steps` separately.
+
+## 10. Troubleshooting
+
+- Placeholder paths: replace all `/path/to/...` values before running.
+- Missing ActionDiT init: run Section 5.1 and set `framework.action_expert_init_from`.
+- LIBERO import error: install LIBERO or pass `--libero-home /path/to/LIBERO`.
+- No checkpoint found: pass `--checkpoint` or check `training.output_dir`.
+- Wrong action scale: check action/state stats paths and normalization settings.
+- Multi-camera mismatch: check `video_keys`, `concat_multi_camera`, and `video_size`.
