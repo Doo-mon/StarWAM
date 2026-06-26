@@ -13,22 +13,9 @@ TOKEN_ACTION = "token_action"
 LATENT_ACTION = "latent_action"
 
 _MODEL_FAMILY_ALIASES = {
-    "feature": FEATURE_CONDITIONED_ACTION_MODEL,
-    "feature_action": FEATURE_CONDITIONED_ACTION_MODEL,
-    "feature_conditioned": FEATURE_CONDITIONED_ACTION_MODEL,
-    "feature_conditioned_action": FEATURE_CONDITIONED_ACTION_MODEL,
     FEATURE_CONDITIONED_ACTION_MODEL: FEATURE_CONDITIONED_ACTION_MODEL,
-    "mot": MOT_WAM,
-    "mot_wam": MOT_WAM,
-    "fastwam": MOT_WAM,
-    "fast_wam": MOT_WAM,
-    "motus": MOT_WAM,
-    "shared": SHARED_DIT_WAM,
-    "shared_dit": SHARED_DIT_WAM,
-    "shared_dit_wam": SHARED_DIT_WAM,
-    "register": SHARED_DIT_WAM,
-    "causal_token": SHARED_DIT_WAM,
-    "latent_frame": SHARED_DIT_WAM,
+    MOT_WAM: MOT_WAM,
+    SHARED_DIT_WAM: SHARED_DIT_WAM,
 }
 
 _SUPPORTED_ACTION_REPRESENTATIONS = {

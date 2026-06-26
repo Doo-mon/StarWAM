@@ -750,7 +750,7 @@ class StarWAMTrainer:
                 eval_extra_kwargs = {
                     "proprio": None if proprio is None else proprio[:, 0, :],
                 }
-                if getattr(self.config, "eval_decoupled_action_steps", False):
+                if hasattr(self._unwrap(), "shared_dit"):
                     eval_extra_kwargs["action_num_inference_steps"] = int(
                         self.config.eval_action_num_inference_steps or self.config.eval_num_inference_steps
                     )

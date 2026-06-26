@@ -67,13 +67,10 @@ def build_framework(config: Any, device: str = "cpu", dtype=None):
             raise NotImplementedError(
                 "StarWAM shared_dit_wam currently trains only taxonomy.action_representation='token_action'."
             )
-        from dataclasses import replace
-
         from starwam.backbone import build_backbone
         from starwam.wam import SharedDiTWAM
 
-        backbone_cfg = replace(config.backbone, load_dit=False)
-        backbone = build_backbone(backbone_cfg, device=device, dtype=dtype)
+        backbone = build_backbone(config.backbone, device=device, dtype=dtype, load_dit=False)
         LOGGER.info("Building StarWAM shared-DiT WAM with backbone=%s", config.backbone.type)
         return SharedDiTWAM(backbone, config.framework, device=device, dtype=dtype)
 
@@ -303,7 +300,6 @@ def build_trainer(model: Any, config: StarWAMConfig):
     val_dataset = None
     if float(getattr(config.data, "val_split", 0.0) or 0.0) > 0:
         val_dataset = build_dataset(config, is_training=False, text_dim=text_dim)
-    config.training.eval_decoupled_action_steps = str(getattr(config.framework, "type", "")) == "shared_dit"
     if config.training.eval_action_num_inference_steps is None:
         config.training.eval_action_num_inference_steps = int(getattr(config.inference, "action_num_inference_steps", config.training.eval_num_inference_steps))
     return StarWAMTrainer(model, train_dataset, val_dataset, config.training)

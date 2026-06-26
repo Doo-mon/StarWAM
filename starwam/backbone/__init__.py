@@ -13,7 +13,13 @@ WAN_BACKBONES = {"wan22_5b", "wan22_14b"}
 COSMOS_PREDICT2_BACKBONES = {"cosmos_predict2", "cosmos_predict2_2b"}
 
 
-def build_backbone(config: BackboneConfig, device: str = "cpu", dtype=None) -> BaseBackbone:
+def build_backbone(
+    config: BackboneConfig,
+    device: str = "cpu",
+    dtype=None,
+    *,
+    load_dit: bool = True,
+) -> BaseBackbone:
     """Build a StarWAM backbone."""
 
     if dtype is None:
@@ -23,7 +29,7 @@ def build_backbone(config: BackboneConfig, device: str = "cpu", dtype=None) -> B
             config,
             device=device,
             dtype=dtype,
-            load_dit=getattr(config, "load_dit", True),
+            load_dit=load_dit,
             load_text_encoder=getattr(config, "load_text_encoder", False),
         )
     if config.type in COSMOS_PREDICT2_BACKBONES:
@@ -33,7 +39,7 @@ def build_backbone(config: BackboneConfig, device: str = "cpu", dtype=None) -> B
             config,
             device=device,
             dtype=dtype,
-            load_dit=getattr(config, "load_dit", True),
+            load_dit=load_dit,
             load_text_encoder=getattr(config, "load_text_encoder", False),
         )
     raise ValueError(

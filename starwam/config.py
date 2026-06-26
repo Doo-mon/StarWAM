@@ -10,8 +10,6 @@ class BackboneConfig:
 
     type: str = "wan22_5b"  # wan22_5b | wan22_14b | cosmos_predict2
     pretrained_model_id: str = "Wan-AI/Wan2.2-TI2V-5B"
-    tokenizer_model_id: str = "Wan-AI/Wan2.1-T2V-1.3B"
-    load_dit: bool = True
     load_text_encoder: bool = True
     tokenizer_max_len: int = 512
 
@@ -51,7 +49,6 @@ class FrameworkConfig:
     action_expert_head_init: Literal["random", "zero", "payload"] = "random"
 
     # Shared-DiT/register-token settings used by shared_dit_wam presets.
-    frame_seqlen: Optional[int] = None
     num_frame_per_block: int = 2
     num_action_per_block: Optional[int] = None
     num_state_per_block: int = 1
@@ -59,7 +56,6 @@ class FrameworkConfig:
     shared_dit_clean_context: str = "full_video"  # none | full_video
     shared_dit_pin_first_latent_step: bool = True
     shared_dit_checkpoint_blocks: bool = True
-    concat_first_frame_latent: bool = False
 
 
 @dataclass
@@ -102,7 +98,6 @@ class TrainingConfig:
     num_workers: int = 4
     eval_num_inference_steps: int = 20
     eval_action_num_inference_steps: Optional[int] = None
-    eval_decoupled_action_steps: bool = False
     warmup_ratio: float = 0.05
     wandb_enabled: bool = False
     wandb_project: str = "starwam"
@@ -113,15 +108,13 @@ class TrainingConfig:
 
 @dataclass
 class DataConfig:
-    format: str = "lerobot"  # lerobot | oxe
     dataset_type: str = "synthetic"  # synthetic | lerobot
     root: Optional[str] = None  # required when dataset_type == "lerobot"
     dataset_dirs: list = field(default_factory=list)
     num_frames: int = 17
     video_size: list = field(default_factory=lambda: [256, 256])
-    camera_key: Optional[str] = None
-    video_key: str = "observation.images.cam_high"
-    video_keys: list = field(default_factory=list)
+    video_key: str = "observation.images.cam_high"  # single-camera video key
+    video_keys: list = field(default_factory=list)  # multi-camera video keys; falls back to video_key when empty
     concat_multi_camera: str = "horizontal"  # horizontal | vertical
     action_key: str = "action"
     state_key: str = "observation.state"
@@ -136,7 +129,6 @@ class DataConfig:
     normalize_states: bool = False
     state_norm_mode: str = "minmax"  # minmax | zscore
     state_stats_path: Optional[str] = None
-    action_gripper_dim: int = -1
     delta_action_dim_mask: Optional[list] = None
     val_split: float = 0.0  # held-out fraction of episodes for validation
     val_split_seed: int = 42
@@ -144,7 +136,6 @@ class DataConfig:
 
 @dataclass
 class InferenceConfig:
-    mode: str = "cached"  # joint | cached | planning
     num_inference_steps: int = 20
     action_num_inference_steps: int = 10
     seed: int = 42
