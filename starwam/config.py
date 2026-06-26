@@ -48,6 +48,17 @@ class FrameworkConfig:
     # loads `head_state_dict` from the preprocessing payload.
     action_expert_head_init: Literal["random", "zero", "payload"] = "random"
 
+    # Feature-conditioned action-model settings.
+    feature_condition_input: str = "observation"  # observation | ground_truth_video | generated_video
+    feature_condition_noise: str = "none"  # none | random_flow_noise | scheduler
+    feature_condition_layer: int = -1
+    feature_condition_num_tokens: Optional[int] = None
+    feature_condition_include_text: bool = True
+    feature_condition_include_timestep: bool = True
+    feature_condition_train_backbone: bool = False
+    feature_condition_pin_first_latent_step: bool = True
+    feature_condition_inference_video_steps: Optional[int] = None
+
     # Shared-DiT/register-token settings used by shared_dit_wam presets.
     num_frame_per_block: int = 2
     num_action_per_block: Optional[int] = None

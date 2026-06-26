@@ -54,10 +54,17 @@ def build_framework(config: Any, device: str = "cpu", dtype=None):
         return MoTWAM(backbone, config.framework, device=device, dtype=dtype)
 
     if model_family == FEATURE_CONDITIONED_ACTION_MODEL:
-        raise NotImplementedError(
-            "StarWAM feature_conditioned_action_model is not implemented for training yet. "
-            "Use taxonomy.model_family='mot_wam' for the first LIBERO path."
-        )
+        if config.framework.type not in {"feature_conditioned", "feature_conditioned_action"}:
+            raise ValueError(
+                "StarWAM feature_conditioned_action_model requires "
+                "framework.type='feature_conditioned'"
+            )
+        from starwam.backbone import build_backbone
+        from starwam.wam import FeatureConditionedActionModel
+
+        backbone = build_backbone(config.backbone, device=device, dtype=dtype)
+        LOGGER.info("Building StarWAM feature-conditioned action model with backbone=%s", config.backbone.type)
+        return FeatureConditionedActionModel(backbone, config.framework, device=device, dtype=dtype)
 
     if model_family == SHARED_DIT_WAM:
         if config.framework.type not in {"shared_dit", "shared_dit_wam"}:
