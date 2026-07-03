@@ -2,15 +2,60 @@
 # StarWAM LIBERO Feature-Conditioned Action Model: Wan2.2-TI2V-5B
 # ============================================================================
 #
-# This recipe trains an action flow model from intermediate video-DiT features.
-# The default path uses clean observation features. To train from noised ground
-# truth video features, set:
-#   framework.feature_condition_input: ground_truth_video
-#   framework.feature_condition_noise: random_flow_noise
+# This recipe trains an action flow model from clean observation video-DiT
+# features. It follows the StarWAM open-source abstraction: a single Wan DiT
+# forward extracts intermediate tokens, and the existing ActionDiT predicts
+# actions with flow matching.
 #
-# For generated-video feature inference, set:
-#   framework.feature_condition_input: generated_video
-#   framework.feature_condition_noise: scheduler
+# Training settings
+# -----------------
+# - Backbone: Wan2.2-TI2V-5B (video DiT co-trained through the action loss)
+# - Model family: Feature-conditioned action model with a randomly initialized ActionDiT expert
+# - Dataset: LIBERO spatial + object + goal + libero_10
+# - Dataset size: 273,465 train samples
+# - Text prompts: 40 unique LIBERO task instructions
+# - Normalization: min/max action stats + min/max state/proprio stats
+# - Feature extraction: clean observation single-frame Wan DiT forward
+#     framework.feature_condition_input: observation
+#     framework.feature_condition_noise: none
+#     framework.feature_condition_layer: -1
+#     framework.feature_condition_num_tokens: 32
+#     framework.feature_condition_include_timestep: false
+#     framework.feature_condition_train_backbone: true
+#
+# Training schedule
+# -----------------
+# - batch_size=8, grad_acc=2, world_size=8, effective_global_batch=128
+# - num_epochs=50, max_steps=null -> derived max_steps ~106,850
+# - warmup_steps=1,000
+# - Scheduler: cosine, lr=1e-4 -> eta_min=1e-6
+# - Evaluation used checkpoint-100000
+#
+# LIBERO rollout settings
+# -----------------------
+# - Evaluation checkpoint: checkpoint-100000
+# - Trials: 50 trials/task, 10 tasks/suite
+# - Action inference steps: 10 (`inference.num_inference_steps` /
+#     `inference.action_num_inference_steps`; training/rollout feature paths aligned)
+# - Video/action infer_shift: 5.0 / 5.0
+# - Runtime: num_steps_wait=30, replan_steps=10, seed=42, fixed_seed=false
+#
+# LIBERO rollout results @ checkpoint-100000, 50 trials/task
+# ---------------------------------------------------------
+# - libero_spatial: 454/500 = 90.8%
+# - libero_object:  479/500 = 95.8%
+# - libero_goal:    470/500 = 94.0%
+# - libero_10:      406/500 = 81.2%
+# - Overall micro average: 1809/2000 = 90.5%
+# - Overall macro average: 90.4%
+#
+# The defaults keep training and rollout feature extraction aligned:
+#   framework.feature_condition_input: observation
+#   framework.feature_condition_noise: none
+#   inference.num_inference_steps: 10
+#
+# To experiment with noised ground-truth or generated-video features, override
+# the feature_condition_* fields explicitly from the launch command.
 # ============================================================================
 
 taxonomy:
@@ -33,17 +78,17 @@ framework:
   chunk_size: 32
   proprio_dim: 8
   action_expert_hidden_dim: 1024
-  action_expert_init_from: /path/to/preprocessed/ActionDiT_linear_interp_Wan22_alphascale_1024hdim.pt
+  action_expert_init_from: null
   action_expert_head_init: random
   action_expert_use_gradient_checkpointing: false
 
   feature_condition_input: observation
   feature_condition_noise: none
   feature_condition_layer: -1
-  feature_condition_num_tokens: 256
+  feature_condition_num_tokens: 32
   feature_condition_include_text: true
-  feature_condition_include_timestep: true
-  feature_condition_train_backbone: false
+  feature_condition_include_timestep: false
+  feature_condition_train_backbone: true
   feature_condition_pin_first_latent_step: true
   feature_condition_inference_video_steps: 8
 
@@ -65,19 +110,19 @@ training:
   weight_decay: 1.0e-2
   batch_size: 8
   gradient_accumulation_steps: 2
-  num_epochs: 10
+  num_epochs: 50
   max_steps: null
   mixed_precision: bf16
   max_grad_norm: 1.0
   log_every: 10
   save_every: 2000
   eval_every: 200
-  eval_num_inference_steps: 4
+  eval_num_inference_steps: 10
   eval_max_samples: 4
   eval_compute_video_psnr: false
   seed: 42
   lr_scheduler_type: cosine
-  warmup_steps: null
+  warmup_steps: 1000
   min_lr: 0.0
   num_workers: 8
   strategy: full
@@ -118,6 +163,6 @@ data:
   val_split_seed: 42
 
 inference:
-  num_inference_steps: 8
-  action_num_inference_steps: 20
+  num_inference_steps: 10
+  action_num_inference_steps: 10
   seed: 42

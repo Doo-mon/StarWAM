@@ -48,6 +48,7 @@ examples/libero/configs/recipes/
 | `starwam_libero_mot_wan22_5b.yaml` | `mot_wam` | Wan2.2-TI2V-5B | Fast-WAM-aligned MoT recipe. Requires a preprocessed ActionDiT init payload. |
 | `starwam_libero_mot_cosmos_predict2.yaml` | `mot_wam` | Cosmos-Predict2-2B-Video2World | MoT recipe with Cosmos-Predict2 backbone. Requires a preprocessed Cosmos ActionDiT init payload. |
 | `starwam_libero_shared_dit_wan22_5b.yaml` | `shared_dit_wam` | Wan2.2-TI2V-5B | Shared-DiT/register-token recipe with decoupled video/action inference steps. |
+| `starwam_libero_feature_conditioned_wan22_5b.yaml` | `feature_conditioned_action_model` | Wan2.2-TI2V-5B | Feature-conditioned action model: a single Wan DiT forward extracts observation tokens and a randomly initialized ActionDiT predicts actions. No preprocessed ActionDiT init required. |
 
 ### Download data and backbones
 
@@ -74,7 +75,7 @@ The release recipes use placeholder paths. Before running training or rollout, r
 | Field | Required for | What to set |
 | --- | --- | --- |
 | `backbone.pretrained_model_id` | all recipes | Local Wan2.2 or Cosmos-Predict2 checkpoint directory. Download/prepare this yourself. |
-| `framework.action_expert_init_from` | Wan2.2 MoT and Cosmos-Predict2 MoT | Output of Section 5.1 (`preprocess_action_dit_init`). Not needed for Shared-DiT. |
+| `framework.action_expert_init_from` | Wan2.2 MoT and Cosmos-Predict2 MoT | Output of Section 5.1 (`preprocess_action_dit_init`). Not needed for Shared-DiT or the feature-conditioned recipe (both leave it `null`). |
 | `training.output_dir` | all recipes | Run output directory. Checkpoints, logs, stats, and caches are written here. |
 | `data.dataset_dirs` | all real LIBERO runs | LeRobot-format LIBERO dataset dirs. Set in YAML or pass a quoted list through `--override`. |
 | `data.text_embedding_cache_dir` | all real LIBERO runs | Text embedding cache dir. Training creates missing caches; Wan users may also precompute via Section 5.2. |
@@ -256,7 +257,28 @@ accelerate launch \
     training.wandb_enabled=false
 ```
 
-### 6.4 Launch scripts
+### 6.4 Wan2.2 Feature-Conditioned action model
+
+The feature-conditioned recipe does not need the Section 5.1 ActionDiT init; the
+action expert is randomly initialized (`framework.action_expert_init_from: null`).
+Launch training:
+
+```bash
+accelerate launch \
+  --config_file configs/accelerate/deepspeed_zero2.yaml \
+  -m starwam.training.train \
+  --config examples/libero/configs/recipes/starwam_libero_feature_conditioned_wan22_5b.yaml \
+  --override \
+    'data.dataset_dirs=["/path/to/libero_spatial_lerobot","/path/to/libero_object_lerobot","/path/to/libero_goal_lerobot","/path/to/libero_10_lerobot"]' \
+    backbone.pretrained_model_id=/path/to/Wan2.2-TI2V-5B \
+    training.output_dir=/path/to/output/starwam_libero_feature_conditioned_wan22_5b \
+    data.text_embedding_cache_dir=/path/to/output/starwam_libero_feature_conditioned_wan22_5b/text_embedding_cache \
+    data.action_stats_path=/path/to/output/starwam_libero_feature_conditioned_wan22_5b/action_stats.json \
+    data.state_stats_path=/path/to/output/starwam_libero_feature_conditioned_wan22_5b/action_stats.json \
+    training.wandb_enabled=false
+```
+
+### 6.5 Launch scripts
 
 Convenience scripts are provided in:
 
@@ -269,6 +291,7 @@ Current scripts:
 ```text
 launch_starwam_libero_mot_wan22_5b_8gpu.sh
 launch_starwam_libero_shared_dit_wan22_5b_8gpu.sh
+launch_starwam_libero_feature_conditioned_wan22_5b_8gpu.sh
 launch_starwam_libero_mot_rollout.sh
 ```
 
@@ -367,7 +390,31 @@ python examples/libero/rollout.py \
     data.state_stats_path=/path/to/output/starwam_libero_shared_dit_wan22_5b/action_stats.json
 ```
 
-### 8.4 Rollout launcher and outputs
+### 8.4 Wan2.2 Feature-Conditioned rollout
+
+Feature-conditioned uses a single action denoising schedule (no decoupled steps),
+so pass only `--num-inference-steps`.
+
+```bash
+python examples/libero/rollout.py \
+  --config examples/libero/configs/recipes/starwam_libero_feature_conditioned_wan22_5b.yaml \
+  --checkpoint /path/to/output/starwam_libero_feature_conditioned_wan22_5b/checkpoint-100000 \
+  --task-suite-name libero_spatial \
+  --num-trials 50 \
+  --num-steps-wait 30 \
+  --num-inference-steps 10 \
+  --replan-steps 10 \
+  --device cuda:0 \
+  --libero-home /path/to/LIBERO \
+  --override \
+    backbone.pretrained_model_id=/path/to/Wan2.2-TI2V-5B \
+    training.output_dir=/path/to/output/starwam_libero_feature_conditioned_wan22_5b \
+    data.text_embedding_cache_dir=/path/to/output/starwam_libero_feature_conditioned_wan22_5b/text_embedding_cache \
+    data.action_stats_path=/path/to/output/starwam_libero_feature_conditioned_wan22_5b/action_stats.json \
+    data.state_stats_path=/path/to/output/starwam_libero_feature_conditioned_wan22_5b/action_stats.json
+```
+
+### 8.5 Rollout launcher and outputs
 
 Use `examples/libero/scripts/launch_starwam_libero_mot_rollout.sh` to evaluate one recipe across multiple LIBERO suites. Set `CHECKPOINT` to either a checkpoint directory or a direct checkpoint file. Direct DeepSpeed `.pt` files are supported; the loader reads `model_state_dict`, `module`, or `state_dict` payloads.
 

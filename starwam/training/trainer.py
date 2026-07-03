@@ -83,8 +83,10 @@ class StarWAMTrainer:
         self.global_step = 0
         self._wandb_run = None
         self._resume_step: Optional[int] = None
+        self._load_model_only_if_requested()
         self._setup()
         self._resume_if_requested()
+        self._apply_resume_lr_override_if_requested()
         self._init_wandb()
 
     def _init_wandb(self):
@@ -298,6 +300,10 @@ class StarWAMTrainer:
             self.model.shared_dit.requires_grad_(True)
         elif hasattr(self.model, "action_expert"):
             self.model.action_expert.requires_grad_(True)
+            model_config = getattr(self.model, "config", None)
+            if bool(getattr(model_config, "feature_condition_train_backbone", False)):
+                dit = self.model.backbone.get_dit()
+                dit.requires_grad_(True)
         else:
             # Shared-DiT WAM variants train the world DiT directly; VAE/text encoder stay frozen.
             if hasattr(self.model, "backbone"):
@@ -312,6 +318,7 @@ class StarWAMTrainer:
                 "action_encoder", "action_decoder",
                 "action_embedder", "action_proj_out",
                 "state_encoder", "proprio_encoder",
+                "feature_projector", "feature_timestep_embedding",
             ):
                 mod = getattr(container, name, None)
                 if mod is not None:
@@ -377,6 +384,7 @@ class StarWAMTrainer:
                 "action_encoder", "action_decoder",
                 "action_embedder", "action_proj_out",
                 "state_encoder", "proprio_encoder",
+                "feature_projector", "feature_timestep_embedding",
             ):
                 mod = getattr(container, name, None)
                 if mod is not None:
@@ -402,6 +410,7 @@ class StarWAMTrainer:
                 "action_encoder", "action_decoder",
                 "action_embedder", "action_proj_out",
                 "state_encoder", "proprio_encoder",
+                "feature_projector", "feature_timestep_embedding",
             ):
                 mod = getattr(container, name, None)
                 if mod is not None:
@@ -483,9 +492,42 @@ class StarWAMTrainer:
                 return param
         return next(self.model.parameters())
 
+    def _load_model_only_if_requested(self):
+        resume = getattr(self.config, "resume", None)
+        if not resume or not bool(getattr(self.config, "resume_model_only", False)):
+            return
+        resume_dir = Path(resume)
+        if not resume_dir.is_dir():
+            raise FileNotFoundError(f"training.resume must point to a checkpoint directory: {resume}")
+        if self.accelerator is None:
+            model_path = resume_dir / "model.pt"
+            if not model_path.is_file():
+                raise FileNotFoundError(f"single-GPU checkpoint missing model.pt: {model_path}")
+            payload = torch.load(model_path, map_location="cpu", weights_only=False)
+            state = payload.get("model_state_dict", payload)
+        else:
+            model_path = resume_dir / "pytorch_model" / "mp_rank_00_model_states.pt"
+            if not model_path.is_file():
+                raise FileNotFoundError(f"DeepSpeed checkpoint missing model state: {model_path}")
+            payload = torch.load(model_path, map_location="cpu", weights_only=False)
+            state = payload.get("module")
+            if not isinstance(state, dict):
+                raise KeyError(f"No module state dict found in {model_path}")
+        result = self.model.load_state_dict(state, strict=False)
+        if result.missing_keys:
+            logger.warning("Missing model-only resume keys, first 20: %s", result.missing_keys[:20])
+        if result.unexpected_keys:
+            logger.warning("Unexpected model-only resume keys, first 20: %s", result.unexpected_keys[:20])
+        if self._is_main_process():
+            logger.info(
+                "Loaded model weights from %s; restarting optimizer/scheduler with lr=%.2e",
+                resume_dir,
+                self.config.learning_rate,
+            )
+
     def _resume_if_requested(self):
         resume = getattr(self.config, "resume", None)
-        if not resume:
+        if not resume or bool(getattr(self.config, "resume_model_only", False)):
             return
         resume_dir = Path(resume)
         if not resume_dir.is_dir():
@@ -503,6 +545,33 @@ class StarWAMTrainer:
         self._resume_step = self.global_step
         if self._is_main_process():
             logger.info(f"Resumed training state from {resume_dir} at step={self.global_step}")
+
+    def _apply_resume_lr_override_if_requested(self):
+        resume_lr = getattr(self.config, "resume_lr", None)
+        resume_scheduler = getattr(self.config, "resume_lr_scheduler_type", None)
+        if resume_lr is None and not resume_scheduler:
+            return
+        if not getattr(self.config, "resume", None):
+            raise ValueError("training.resume_lr/resume_lr_scheduler_type require training.resume")
+        if resume_lr is not None:
+            lr_value = float(resume_lr)
+            for group in self.optimizer.param_groups:
+                group["lr"] = lr_value
+                group["initial_lr"] = lr_value
+        sched_type = str(resume_scheduler or "").strip().lower()
+        if sched_type:
+            if sched_type != "constant":
+                raise ValueError("training.resume_lr_scheduler_type currently supports only 'constant'")
+            self.lr_scheduler = torch.optim.lr_scheduler.ConstantLR(self.optimizer, factor=1.0)
+        if self.accelerator is not None:
+            self.lr_scheduler = self.accelerator.prepare(self.lr_scheduler)
+        if self._is_main_process():
+            current_lr = self.optimizer.param_groups[0]["lr"]
+            logger.info(
+                "Applied resume LR override: lr=%.2e scheduler=%s",
+                current_lr,
+                sched_type or "restored",
+            )
 
     def train(self):
         """Main training loop."""

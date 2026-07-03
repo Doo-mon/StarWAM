@@ -90,6 +90,9 @@ class TrainingConfig:
     warmup_steps: Optional[int] = None  # if set, overrides warmup_ratio
     save_total_limit: Optional[int] = None  # if set, keep at most N checkpoints
     resume: Optional[str] = None
+    resume_model_only: bool = False  # load only model weights from resume and restart optimizer/scheduler
+    resume_lr: Optional[float] = None  # override LR after restoring optimizer/scheduler state
+    resume_lr_scheduler_type: Optional[str] = None  # optional scheduler replacement after resume
     strategy: str = "full"  # full | lora | staged
     # Staged strategy: train action heads only for the first
     # ``staged_warmup_steps`` global steps, then unfreeze the backbone /
