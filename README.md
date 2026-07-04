@@ -6,7 +6,7 @@ StarWAM is a research codebase for building **World-Action Models (WAMs)**: robo
 
 ## News
 
-- **2026/06**: Initial StarWAM codebase prepared with Wan2.2 and Cosmos-Predict2 backbone adapters, LIBERO training/rollout recipes, MoT WAM, and Wan Shared-DiT WAM support.
+- **2026/07**: Initial StarWAM codebase prepared with Wan2.2 and Cosmos-Predict2 backbone adapters, LIBERO training/rollout recipes, MoT WAM, Shared-DiT WAM, and feature-conditioned WAM support.
 
 ## Highlights
 
@@ -49,7 +49,7 @@ StarWAM organizes WAM methods by taxonomy-level model families. The taxonomy is 
 
 ### `feature_conditioned_action_model`
 
-This family is reserved for action models conditioned on video/world-model features. It is the intended home for Video-IDM, Mimic-Video/World2Action, and StarVLA-WM4A-style variants where a video generation model provides hidden states or generated-video features to an action decoder.
+This family covers action models conditioned on video/world-model features. A single Wan DiT forward extracts observation tokens that condition an ActionDiT flow-matching expert. It is the intended home for Video-IDM, Mimic-Video/World2Action, and StarVLA-WM4A-style variants where a video generation model provides hidden states or generated-video features to an action decoder.
 
 ## Examples
 
@@ -62,8 +62,8 @@ Benchmark-specific setup, training, and evaluation instructions are maintained u
 - [x] Wan2.2 backbone adapter.
 - [x] Cosmos-Predict2 backbone adapter.
 - [x] MoT WAM training and action rollout path.
-- [ ] Shared-DiT WAM path.
-- [ ] Feature-conditioned Video-IDM / WM4A action model path.
+- [x] Shared-DiT WAM path.
+- [x] Feature-conditioned Video-IDM / WM4A action model path.
 - [ ] Additional benchmark integrations.
 - [ ] Technical report and model zoo.
 
@@ -75,12 +75,12 @@ If you find StarWAM useful in your research, please consider citing it. A formal
 
 This project draws inspiration and references from several notable open-source initiatives, including:
 
-- [StarVLA](https://github.com/starVLA/starVLA)
-- DreamZero
-- LingBot-VA
-- FastWAM
-- Mimic-Video
-- LIBERO
-- LeRobot
-- Wan
-- Cosmos-Predict2
+- [StarVLA](https://github.com/starVLA/starVLA) — a primary reference for this project; its VLA/WM4A designs and training recipes directly informed StarWAM's action modeling.
+- [DreamZero](https://github.com/dreamzero0/dreamzero)
+- [LingBot-VA](https://github.com/robbyant/lingbot-va)
+- [FastWAM](https://github.com/yuantianyuan01/FastWAM)
+- [Mimic-Video](https://github.com/mimic-video/mimic-video)
+- [LIBERO](https://github.com/Lifelong-Robot-Learning/LIBERO)
+- [LeRobot](https://github.com/huggingface/lerobot)
+- [Wan](https://github.com/Wan-Video/Wan2.2)
+- [Cosmos-Predict2](https://github.com/nvidia-cosmos/cosmos-predict2)

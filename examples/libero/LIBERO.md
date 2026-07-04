@@ -50,6 +50,20 @@ examples/libero/configs/recipes/
 | `starwam_libero_shared_dit_wan22_5b.yaml` | `shared_dit_wam` | Wan2.2-TI2V-5B | Shared-DiT/register-token recipe with decoupled video/action inference steps. |
 | `starwam_libero_feature_conditioned_wan22_5b.yaml` | `feature_conditioned_action_model` | Wan2.2-TI2V-5B | Feature-conditioned action model: a single Wan DiT forward extracts observation tokens and a randomly initialized ActionDiT predicts actions. No preprocessed ActionDiT init required. |
 
+### Wan2.2-TI2V-5B LIBERO results
+
+Reported success rates (50 trials/task, 10 tasks/suite) for the three
+Wan2.2-TI2V-5B recipes. Values are copied from each recipe header.
+
+| Suite | MoT (`mot_wam`) | Shared-DiT (`shared_dit_wam`) | Feature-Conditioned (`feature_conditioned_action_model`) |
+| --- | --- | --- | --- |
+| libero_spatial | 96.2% | 94.2% | 90.8% |
+| libero_object | 99.0% | 100.0% | 95.8% |
+| libero_goal | 97.4% | 96.8% | 94.0% |
+| libero_10 | 93.8% | 96.2% | 81.2% |
+| Overall (micro) | 96.6% | 96.8% | 90.5% |
+| Eval checkpoint | checkpoint-20000 | checkpoint-50000 | checkpoint-100000 |
+
 ### Download data and backbones
 
 ```bash
@@ -164,7 +178,7 @@ python -m starwam.tools.preprocess_action_dit_init \
   --dtype bfloat16
 ```
 
-Set the generated path in YAML or pass `--override framework.action_expert_init_from=/path/to/preprocessed/<payload>.pt`. Not needed for Shared-DiT.
+Set the generated path in YAML or pass `--override framework.action_expert_init_from=/path/to/preprocessed/<payload>.pt`. Not needed for Shared-DiT or the feature-conditioned recipe (both leave it `null`).
 
 ### 5.2 Text embedding cache
 
@@ -438,6 +452,10 @@ export ROLLOUT_OVERRIDES='data.dataset_dirs=["/path/to/libero_spatial_lerobot","
 bash examples/libero/scripts/launch_starwam_libero_mot_rollout.sh
 ```
 
+With `RUN_ALL_SUITES=1` the launcher runs all four suites and each writes its
+own `results.json`. Aggregate them into an overall success rate with
+`examples/libero/summarize_results.py` (Section 8.6).
+
 Useful rollout options:
 
 ```bash
@@ -450,6 +468,54 @@ Useful rollout options:
 With `--save-video --output-dir /path/to/rollout_outputs`, videos are written to `/path/to/rollout_outputs/videos/`. Without `--output-dir`, videos are written under `${training.output_dir}/libero_rollout/<checkpoint-name>/<task-suite-name>/videos/`. Rollout videos save one frame per executed environment step after the initial wait period.
 
 The rollout script loads the recipe/checkpoint, applies overrides, builds the model, and repeatedly calls `model.infer_action(...)` in LIBERO.
+
+### 8.6 Results files and cross-suite summary
+
+Each `rollout.py` run writes one `results.json` per suite:
+
+```text
+<training.output_dir>/libero_rollout/<checkpoint-name>/<task-suite-name>/results.json
+```
+
+Each `results.json` contains per-task success rates and the suite-level
+micro-average (`total_successes`, `total_trials`, `success_rate`). It does
+**not** aggregate across suites — each suite is a separate run/file.
+
+To get the overall (cross-suite) success rate, aggregate the four
+per-suite files with `examples/libero/summarize_results.py`:
+
+```bash
+# Aggregate every suite under one checkpoint directory:
+python examples/libero/summarize_results.py \
+  --rollout-dir /path/to/output/<recipe>/libero_rollout/<checkpoint-name>
+
+# Or point at explicit results.json files:
+python examples/libero/summarize_results.py \
+  --results \
+    /path/to/.../libero_spatial/results.json \
+    /path/to/.../libero_object/results.json \
+    /path/to/.../libero_goal/results.json \
+    /path/to/.../libero_10/results.json \
+  --output /path/to/summary.json
+```
+
+It prints a per-suite table plus the micro-average across all suites, and
+writes `summary.json` (defaults to `<rollout-dir>/summary.json` when
+`--rollout-dir` is used):
+
+```text
+Suite            Success  Trials  Success rate
+---------------  -------  ------  ------------
+libero_spatial   471      500     94.2%
+libero_object    500      500     100.0%
+libero_goal      484      500     96.8%
+libero_10        481      500     96.2%
+---------------  -------  ------  ------------
+Overall (micro)  1936     2000    96.8%
+```
+
+The `Overall (micro)` value is `sum(total_successes) / sum(total_trials)`
+across suites, matching the reported numbers in Section 2.
 
 ## 9. Decoupled action steps
 
