@@ -517,6 +517,76 @@ Overall (micro)  1936     2000    96.8%
 The `Overall (micro)` value is `sum(total_successes) / sum(total_trials)`
 across suites, matching the reported numbers in Section 2.
 
+### 8.7 Rollout from released ModelScope checkpoints
+
+Pretrained Wan2.2-TI2V-5B checkpoints are released on ModelScope at
+[`panshaohua/starwam`](https://www.modelscope.cn/models/panshaohua/starwam).
+Download them first:
+
+```bash
+pip install modelscope
+modelscope download --model panshaohua/starwam --local_dir /path/to/starwam_ckpts
+```
+
+After download, the LIBERO checkpoints are laid out as:
+
+```text
+/path/to/starwam_ckpts/starwam-libero/
+  action_stats.json                          # shared action stats (both models)
+  mot/starwam_wan225b_mot.pt                  # MoT WAM
+  sharedit/starwam_wan225b_shareddit.pt       # Shared-DiT WAM
+```
+
+Point `--checkpoint` directly at the `.pt` file (these files use custom names,
+so pass the file path, not the directory). You still need the Wan2.2 backbone
+locally for `backbone.pretrained_model_id`.
+
+Shared-DiT:
+
+```bash
+CKPT_ROOT=/path/to/starwam_ckpts/starwam-libero
+
+python examples/libero/rollout.py \
+  --config examples/libero/configs/recipes/starwam_libero_shared_dit_wan22_5b.yaml \
+  --checkpoint "$CKPT_ROOT/sharedit/starwam_wan225b_shareddit.pt" \
+  --task-suite-name libero_spatial \
+  --num-trials 50 \
+  --num-inference-steps 16 \
+  --action-num-inference-steps 16 \
+  --replan-steps 10 \
+  --device cuda:0 \
+  --libero-home /path/to/LIBERO \
+  --override \
+    backbone.pretrained_model_id=/path/to/Wan2.2-TI2V-5B \
+    training.output_dir=/path/to/output/starwam_libero_shared_dit_wan22_5b \
+    data.text_embedding_cache_dir=/path/to/output/starwam_libero_shared_dit_wan22_5b/text_embedding_cache \
+    data.action_stats_path="$CKPT_ROOT/action_stats.json" \
+    data.state_stats_path="$CKPT_ROOT/action_stats.json"
+```
+
+MoT uses a single denoising schedule — pass only
+`--num-inference-steps`:
+
+```bash
+CKPT_ROOT=/path/to/starwam_ckpts/starwam-libero
+
+python examples/libero/rollout.py \
+  --config examples/libero/configs/recipes/starwam_libero_mot_wan22_5b.yaml \
+  --checkpoint "$CKPT_ROOT/mot/starwam_wan225b_mot.pt" \
+  --task-suite-name libero_spatial \
+  --num-trials 50 \
+  --num-inference-steps 8 \
+  --replan-steps 10 \
+  --device cuda:0 \
+  --libero-home /path/to/LIBERO \
+  --override \
+    backbone.pretrained_model_id=/path/to/Wan2.2-TI2V-5B \
+    training.output_dir=/path/to/output/starwam_libero_mot_wan22_5b \
+    data.text_embedding_cache_dir=/path/to/output/starwam_libero_mot_wan22_5b/text_embedding_cache \
+    data.action_stats_path="$CKPT_ROOT/action_stats.json" \
+    data.state_stats_path="$CKPT_ROOT/action_stats.json"
+```
+
 ## 9. Decoupled action steps
 
 MoT WAM uses a single denoising schedule for action rollout. For MoT recipes, `examples/libero/rollout.py` overrides `action_num_inference_steps` to match `num_inference_steps`, so `inference.action_num_inference_steps` is kept only for schema consistency.

@@ -57,6 +57,24 @@ Benchmark-specific setup, training, and evaluation instructions are maintained u
 
 - [LIBERO examples](examples/libero/LIBERO.md)
 
+## Model Zoo
+
+Pretrained LIBERO checkpoints are released on ModelScope:
+[**panshaohua/starwam**](https://www.modelscope.cn/models/panshaohua/starwam).
+
+- `starwam-libero/mot/starwam_wan225b_mot.pt` — Wan2.2-TI2V-5B MoT WAM.
+- `starwam-libero/sharedit/starwam_wan225b_shareddit.pt` — Wan2.2-TI2V-5B Shared-DiT WAM.
+- `starwam-libero/action_stats.json` — shared action normalization stats for both checkpoints.
+
+Download:
+
+```bash
+pip install modelscope
+modelscope download --model panshaohua/starwam --local_dir /path/to/starwam_ckpts
+```
+
+See [LIBERO examples](examples/libero/LIBERO.md) for rollout commands that use these checkpoints.
+
 ## Roadmap
 
 - [x] Wan2.2 backbone adapter.
@@ -65,7 +83,8 @@ Benchmark-specific setup, training, and evaluation instructions are maintained u
 - [x] Shared-DiT WAM path.
 - [x] Feature-conditioned Video-IDM / WM4A action model path.
 - [ ] Additional benchmark integrations.
-- [ ] Technical report and model zoo.
+- [x] Pretrained LIBERO checkpoints (ModelScope model zoo).
+- [ ] Technical report.
 
 ## Citation
 
