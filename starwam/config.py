@@ -129,7 +129,7 @@ class DataConfig:
     video_size: list = field(default_factory=lambda: [256, 256])
     video_key: str = "observation.images.cam_high"  # single-camera video key
     video_keys: list = field(default_factory=list)  # multi-camera video keys; falls back to video_key when empty
-    concat_multi_camera: str = "horizontal"  # horizontal | vertical
+    concat_multi_camera: str = "horizontal"  # horizontal | vertical | robotwin
     action_key: str = "action"
     state_key: str = "observation.state"
     action_freq_ratio: int = 1

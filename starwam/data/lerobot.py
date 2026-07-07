@@ -89,10 +89,21 @@ def load_text_cache(path: str | Path, text_len: int, text_dim: int = 4096) -> tu
 def save_text_cache(path: str | Path, context: torch.Tensor, mask: torch.Tensor, prompt: str, task: str) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    context = context.detach().cpu()
+    mask = mask.detach().cpu().bool()
+    # Store only the valid (unpadded) tokens to cut disk usage ~4-5x. This is
+    # lossless for the model: cross-attention masks padded key positions
+    # (context_mask -> SDPA attn_mask), so padded rows never affect the output.
+    # load_text_cache re-pads to text_len and reconstructs the mask.
+    if mask.ndim == 1 and context.ndim == 2 and mask.numel() == context.shape[0]:
+        n = int(mask.sum().item())
+        if 0 < n < context.shape[0]:
+            context = context[:n]
+            mask = mask[:n]
     tmp = path.with_name(f"{path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
     torch.save({
-        "context": context.detach().cpu().to(torch.bfloat16).contiguous(),
-        "mask": mask.detach().cpu().bool().contiguous(),
+        "context": context.to(torch.bfloat16).contiguous(),
+        "mask": mask.contiguous(),
         "prompt": prompt,
         "task": task,
     }, tmp)
@@ -423,7 +434,7 @@ class LeRobotDataset(Dataset):
         self.video_key = video_key
         self.video_keys = list(video_keys) if video_keys else [video_key]
         self.concat_multi_camera = concat_multi_camera
-        if self.concat_multi_camera not in {"horizontal", "vertical"}:
+        if self.concat_multi_camera not in {"horizontal", "vertical", "robotwin"}:
             raise ValueError(f"Unsupported concat_multi_camera: {concat_multi_camera}")
         self.action_key = action_key
         self.state_key = state_key
@@ -471,6 +482,16 @@ class LeRobotDataset(Dataset):
 
         self._episode_to_task_text: dict[int, str] = {}
         self._load_task_metadata(meta_dir / "tasks.jsonl")
+        # Full task_index -> instruction map (for frame-level instruction
+        # selection, matching Fast-WAM/starVLA). Falls back to the per-episode
+        # first instruction when a frame's task_index cannot be resolved.
+        self._task_index_to_text: dict[int, str] = {}
+        for record in iter_task_records(self.root):
+            try:
+                self._task_index_to_text[int(record["task_index"])] = str(record["task"])
+            except (KeyError, TypeError, ValueError):
+                continue
+        self._episode_task_indices: dict[int, list[int]] = {}
         self._samples: list[tuple[int, int]] = []
         for ep_idx, ep in enumerate(self.episodes):
             ep_len = int(ep.get("length", 0))
@@ -568,10 +589,33 @@ class LeRobotDataset(Dataset):
         col = table.column(self.state_key).to_pylist()
         return torch.tensor(col, dtype=torch.float32)
 
-    def _load_t5(self, episode_index: int) -> tuple[torch.Tensor, torch.Tensor]:
-        task = self._episode_to_task_text.get(episode_index)
+    def _resolve_task_text(self, parquet_path: Path, episode_index: int, frame: int) -> str | None:
+        """Instruction for the conditioning frame.
+
+        Uses the sampled frame's ``task_index`` (Fast-WAM/starVLA-style
+        frame-level instruction diversity). Falls back to the per-episode first
+        instruction when the parquet has no ``task_index`` column (e.g. LIBERO
+        behaves identically since every frame shares one task_index).
+        """
+        if self._task_index_to_text:
+            task_indices = self._episode_task_indices.get(episode_index)
+            if task_indices is None:
+                try:
+                    table = pq.read_table(parquet_path, columns=["task_index"])
+                    task_indices = [int(x) for x in table.column("task_index").to_pylist()]
+                except Exception:
+                    task_indices = []
+                self._episode_task_indices[episode_index] = task_indices
+            if task_indices:
+                f = min(max(int(frame), 0), len(task_indices) - 1)
+                text = self._task_index_to_text.get(int(task_indices[f]))
+                if text:
+                    return text
+        return self._episode_to_task_text.get(episode_index)
+
+    def _load_t5(self, task: str | None) -> tuple[torch.Tensor, torch.Tensor]:
         if not task:
-            raise KeyError(f"No task text found for episode {episode_index} in {self.root}")
+            raise KeyError(f"No task text resolved for text conditioning in {self.root}")
         cache = self._fastwam_cache_path(task)
         if cache is None:
             raise ValueError("data.text_embedding_cache_dir must be set for LeRobot text conditioning")
@@ -668,18 +712,41 @@ class LeRobotDataset(Dataset):
         camera_frames = []
         for video_path in video_paths:
             frames_uint8 = _decode_video_frames(video_path, video_indices)  # [T, 3, H, W] uint8
-            camera_frames.append(_resize_frames(frames_uint8, self.video_size).float() / 255.0)
-        if len(camera_frames) == 1:
-            frames = camera_frames[0]
-        elif self.concat_multi_camera == "horizontal":
-            frames = torch.cat(camera_frames, dim=-1)
+            camera_frames.append(frames_uint8)
+        if self.concat_multi_camera == "robotwin":
+            # RoboTwin 3-camera grid, matching Fast-WAM's layout exactly so that
+            # training and rollout see identical pixels. Camera order in
+            # ``video_keys`` MUST be [head, left_wrist, right_wrist].
+            #   top    = head resized to 256x320
+            #   bottom = [left | right] each 128x160, concatenated on width -> 128x320
+            #   frame  = [top ; bottom] concatenated on height -> 384x320
+            if len(camera_frames) != 3:
+                raise ValueError(
+                    "concat_multi_camera='robotwin' requires exactly 3 cameras "
+                    f"(head, left_wrist, right_wrist), got {len(camera_frames)}"
+                )
+            top = _resize_frames(camera_frames[0], (256, 320)).float() / 255.0
+            left = _resize_frames(camera_frames[1], (128, 160)).float() / 255.0
+            right = _resize_frames(camera_frames[2], (128, 160)).float() / 255.0
+            bottom = torch.cat([left, right], dim=-1)  # [T, 3, 128, 320]
+            frames = torch.cat([top, bottom], dim=-2)  # [T, 3, 384, 320]
         else:
-            frames = torch.cat(camera_frames, dim=-2)
+            camera_frames = [
+                _resize_frames(f, self.video_size).float() / 255.0 for f in camera_frames
+            ]
+            if len(camera_frames) == 1:
+                frames = camera_frames[0]
+            elif self.concat_multi_camera == "horizontal":
+                frames = torch.cat(camera_frames, dim=-1)
+            else:
+                frames = torch.cat(camera_frames, dim=-2)
         # Map to [-1, 1] and reshape to [3, T, H, W].
         video = (frames * 2.0 - 1.0).permute(1, 0, 2, 3).contiguous()
 
-        # Text context (precomputed T5).
-        context, context_mask = self._load_t5(episode_index)
+        # Text context (precomputed T5). Instruction chosen by the conditioning
+        # frame's task_index (frame-level diversity; LIBERO-safe fallback).
+        task_text = self._resolve_task_text(parquet_path, episode_index, start)
+        context, context_mask = self._load_t5(task_text)
 
         sample = {
             "video": video,

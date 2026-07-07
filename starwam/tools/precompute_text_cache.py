@@ -58,6 +58,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--dtype", default="bf16", choices=("bf16", "fp16", "fp32"))
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--num-shards", type=int, default=1, help="Split the task list into this many shards (for multi-GPU precompute).")
+    parser.add_argument("--shard-index", type=int, default=0, help="Which shard this process handles (0 <= shard-index < num-shards).")
     parser.add_argument("--override", nargs="*", default=[], help="Config overrides key=value")
     return parser.parse_args()
 
@@ -77,6 +79,12 @@ def main() -> None:
     tasks = collect_lerobot_tasks(dataset_dirs)
     if not tasks:
         raise ValueError("No tasks found from meta/tasks.jsonl in dataset dirs.")
+
+    if args.num_shards > 1:
+        if not (0 <= args.shard_index < args.num_shards):
+            raise ValueError(f"shard-index must be in [0, {args.num_shards}), got {args.shard_index}")
+        tasks = tasks[args.shard_index :: args.num_shards]
+        print(f"[text-cache] shard {args.shard_index}/{args.num_shards}: {len(tasks)} tasks")
 
     cache_dir = _resolve_cache_dir(config, args.output_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
