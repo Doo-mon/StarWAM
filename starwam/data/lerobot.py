@@ -32,6 +32,7 @@ import json
 import os
 import random
 import uuid
+from collections import OrderedDict
 from pathlib import Path
 from typing import Optional
 
@@ -225,12 +226,21 @@ def _decode_video_frames(video_path: Path, frame_indices: list[int]) -> torch.Te
             stream = container.streams.video[0]
             stream.thread_type = "NONE"
             stream.codec_context.thread_count = 1
-            for i, frame in enumerate(container.decode(stream)):
-                if i in target_set:
-                    arr = frame.to_ndarray(format="rgb24")  # (H, W, 3) uint8
-                    decoded[i] = torch.from_numpy(arr.copy()).permute(2, 0, 1)
-                if i >= max_idx:
-                    break
+            try:
+                for i, frame in enumerate(container.decode(stream)):
+                    if i in target_set:
+                        arr = frame.to_ndarray(format="rgb24")  # (H, W, 3) uint8
+                        decoded[i] = torch.from_numpy(arr.copy()).permute(2, 0, 1)
+                    if i >= max_idx:
+                        break
+            finally:
+                # Breaking out of decode() early leaves libav's decoder holding
+                # internal frame buffers that container.close() alone does NOT
+                # free -> ~0.27MB leaked per call, which OOM-kills dataloader
+                # workers after a few hundred steps. Closing the codec context
+                # explicitly releases them (verified: RSS flat vs linear growth).
+                stream.codec_context.close()
+
     except Exception as e:
         raise RuntimeError(f"failed to decode video frames from {video_path}: {e}") from e
 
@@ -452,7 +462,12 @@ class LeRobotDataset(Dataset):
         self.text_embedding_cache_dir = Path(text_embedding_cache_dir) if text_embedding_cache_dir else None
         self.text_prompt_template = text_prompt_template
         self.text_cache_encoder_id = text_cache_encoder_id
-        self._text_cache: dict[Path, tuple[torch.Tensor, torch.Tensor]] = {}
+        # Bounded LRU: each entry is a ~3MB T5 embedding and RoboTwin has ~921k
+        # unique frame-level instructions, so an unbounded cache grows without
+        # limit and OOM-kills dataloader workers. A small cap keeps LIBERO-style
+        # low-cardinality datasets fully cached while bounding per-worker RSS.
+        self._text_cache: "OrderedDict[Path, tuple[torch.Tensor, torch.Tensor]]" = OrderedDict()
+        self._text_cache_max = 1024
         self.delta_action_dim_mask = (
             torch.as_tensor(delta_action_dim_mask, dtype=torch.bool)
             if delta_action_dim_mask is not None else None
@@ -626,6 +641,10 @@ class LeRobotDataset(Dataset):
             )
         if cache not in self._text_cache:
             self._text_cache[cache] = load_text_cache(cache, self.text_len, self.text_dim)
+            if len(self._text_cache) > self._text_cache_max:
+                self._text_cache.popitem(last=False)
+        else:
+            self._text_cache.move_to_end(cache)
         return self._text_cache[cache]
 
     @staticmethod

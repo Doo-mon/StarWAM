@@ -44,3 +44,4 @@ refs/
 .empty
 
 temp/
+.deepspeed_env

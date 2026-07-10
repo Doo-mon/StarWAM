@@ -66,23 +66,32 @@ training:
   output_dir: /path/to/output/starwam_robotwin_mot_wan22_5b
   learning_rate: 1.0e-4
   weight_decay: 1.0e-2
+  # Fast-WAM RoboTwin target: GLOBAL batch = 1024 (they use 64 GPUs x
+  # per_device 16 x grad_accum 1). Keep the *global* batch at 1024 and
+  # lr=1e-4 regardless of how many GPUs you have; set grad_accum so that
+  #   per_device_batch (8) x grad_accum x num_gpus == 1024:
+  #     64 GPUs -> grad_accum 2   (8 x 2 x 64 = 1024)
+  #     16 GPUs -> grad_accum 8   (8 x 8 x 16 = 1024)   [2 nodes x 8]
+  #      8 GPUs -> grad_accum 16  (8 x 16 x 8 = 1024)   [single node, default below]
+  # At global batch 1024, 5 epochs over ~6.07M frames ~= 29.7k optimizer
+  # steps (matches the paper's ~30k), warmup 5% ~= 1.48k.
   batch_size: 8
-  gradient_accumulation_steps: 2
-  num_epochs: 10
+  gradient_accumulation_steps: 16
+  num_epochs: 5
   max_steps: null
   mixed_precision: bf16
   max_grad_norm: 1.0
   log_every: 10
-  save_every: 2000
-  eval_every: 200
+  save_every: 2500
+  eval_every: 500
   eval_num_inference_steps: 4
   eval_max_samples: 4
   eval_compute_video_psnr: false
   seed: 42
   lr_scheduler_type: cosine
-  warmup_steps: null
+  warmup_steps: null      # null -> 5% of total steps (Fast-WAM convention)
   min_lr: 0.0
-  num_workers: 8
+  num_workers: 8          # safe now that the T5-cache/video-decode leaks in data/lerobot.py are fixed
   strategy: full
   save_total_limit: 3
   wandb_enabled: true
