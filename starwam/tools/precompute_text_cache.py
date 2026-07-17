@@ -8,8 +8,6 @@ from pathlib import Path
 
 import torch
 
-from starwam.backbone.cosmos_predict2 import CosmosPredict2TextEncoder
-from starwam.backbone.wan22 import Wan22TextEncoder
 from starwam.data.lerobot import (
     DEFAULT_TEXT_CACHE_ENCODER_ID,
     DEFAULT_TEXT_PROMPT,
@@ -30,23 +28,15 @@ def _resolve_cache_dir(config, override: str | None) -> Path:
 
 
 def _build_text_encoder(config, model_dir: Path, context_len: int, device: str, dtype: torch.dtype):
-    backbone_type = getattr(config.backbone, "type", None)
-    if backbone_type in {"wan22", "wan22_5b", "wan2.2", "wan"}:
-        return Wan22TextEncoder(
-            ckpt_path=str(model_dir / "models_t5_umt5-xxl-enc-bf16.pth"),
-            tokenizer_path=str(model_dir / "google" / "umt5-xxl"),
-            text_len=context_len,
-            device=device,
-            dtype=dtype,
-        )
-    if backbone_type == "cosmos_predict2":
-        return CosmosPredict2TextEncoder(
-            model_dir=model_dir,
-            text_len=context_len,
-            device=device,
-            dtype=dtype,
-        )
-    raise ValueError(f"Unsupported backbone.type for text cache precompute: {backbone_type}")
+    from starwam.backbone import build_text_encoder
+
+    return build_text_encoder(
+        config.backbone,
+        text_len=context_len,
+        device=device,
+        dtype=dtype,
+        model_dir=model_dir,
+    )
 
 
 def parse_args() -> argparse.Namespace:

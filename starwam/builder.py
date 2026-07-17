@@ -154,25 +154,15 @@ def _ensure_text_caches(config: StarWAMConfig, roots: list[str]) -> None:
                 model_dir = Path(config.backbone.pretrained_model_id)
                 device = f"cuda:{os.environ.get('LOCAL_RANK', '0')}" if torch.cuda.is_available() else "cpu"
                 encoder_dtype = torch.bfloat16 if device.startswith("cuda") else torch.float32
-                if str(getattr(config.backbone, "type", "")) in {"cosmos_predict2", "cosmos_predict2_2b"}:
-                    from starwam.backbone.cosmos_predict2 import CosmosPredict2TextEncoder
+                from starwam.backbone import build_text_encoder
 
-                    encoder = CosmosPredict2TextEncoder(
-                        model_dir=model_dir,
-                        text_len=text_len,
-                        device=device,
-                        dtype=encoder_dtype,
-                    )
-                else:
-                    from starwam.backbone.wan22 import Wan22TextEncoder
-
-                    encoder = Wan22TextEncoder(
-                        ckpt_path=str(model_dir / "models_t5_umt5-xxl-enc-bf16.pth"),
-                        tokenizer_path=str(model_dir / "google" / "umt5-xxl"),
-                        text_len=text_len,
-                        device=device,
-                        dtype=encoder_dtype,
-                    )
+                encoder = build_text_encoder(
+                    config.backbone,
+                    text_len=text_len,
+                    device=device,
+                    dtype=encoder_dtype,
+                    model_dir=model_dir,
+                )
                 LOGGER.info("Generating %d missing StarWAM text caches in %s", len(missing), cache_dir)
                 for start in range(0, len(missing), 4):
                     batch = missing[start:start + 4]

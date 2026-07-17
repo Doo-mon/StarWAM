@@ -22,12 +22,12 @@
 #
 # LIBERO rollout results @ checkpoint-50000, 50 trials/task
 # ---------------------------------------------------------
-# - libero_spatial: 471/500 = 94.2%
+# - libero_spatial: 494/500 = 98.8%
 # - libero_object:  500/500 = 100.0%
-# - libero_goal:    484/500 = 96.8%
-# - libero_10:      481/500 = 96.2%
-# - Overall micro average: 1936/2000 = 96.8%
-# - Overall macro average: 96.8%
+# - libero_goal:    487/500 = 97.4%
+# - libero_10:      482/500 = 96.4%
+# - Overall micro average: 1963/2000 = 98.2%
+# - Overall macro average: 98.2%
 # ============================================================================
 
 taxonomy:

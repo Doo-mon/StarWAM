@@ -101,7 +101,7 @@ training:
 data:
   dataset_type: lerobot
   dataset_dirs:
-    - /root/paddlejob/workspace/env_run/robotwin2.0-fastwam/robotwin2.0
+    - /path/to/robotwin2.0
   # Camera order MUST be [head, left_wrist, right_wrist] for the robotwin
   # concat layout. Keys verified against meta/info.json.
   video_key: observation.images.cam_high

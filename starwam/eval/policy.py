@@ -67,7 +67,7 @@ def load_checkpoint_into(model: torch.nn.Module, checkpoint: str | Path) -> None
     """Load a checkpoint file or directory into ``model`` (non-strict)."""
     checkpoint = Path(checkpoint)
     if checkpoint.is_dir():
-        for name in ("model.pt", "pytorch_model.bin", "model.bin", "pytorch_model/mp_rank_00_model_states.pt"):
+        for name in ("model.pt", "pytorch_model.bin", "model.bin", "mp_rank_00_model_states.pt", "pytorch_model/mp_rank_00_model_states.pt"):
             path = checkpoint / name
             if path.is_file():
                 checkpoint = path
@@ -208,12 +208,10 @@ class StarwamPolicy:
             mask = mask.unsqueeze(0)
         else:
             if self._text_encoder is None:
-                from starwam.backbone.wan22 import Wan22TextEncoder
+                from starwam.backbone import build_text_encoder
 
-                model_dir = Path(self.config.backbone.pretrained_model_id)
-                self._text_encoder = Wan22TextEncoder(
-                    ckpt_path=str(model_dir / "models_t5_umt5-xxl-enc-bf16.pth"),
-                    tokenizer_path=str(model_dir / "google" / "umt5-xxl"),
+                self._text_encoder = build_text_encoder(
+                    self.config.backbone,
                     text_len=text_len,
                     device=str(self.device),
                     dtype=torch.bfloat16 if self.device.type == "cuda" else torch.float32,

@@ -6,6 +6,7 @@ StarWAM is a research codebase for building **World-Action Models (WAMs)**: robo
 
 ## News
 
+- **2026/07**: RoboTwin 2.0 integration — dual-arm MoT recipe, client/server rollout adapter for the official RoboTwin harness (89.5% avg over 50 tasks).
 - **2026/07**: Initial StarWAM codebase prepared with Wan2.2 and Cosmos-Predict2 backbone adapters, LIBERO training/rollout recipes, MoT WAM, Shared-DiT WAM, and feature-conditioned WAM support.
 
 ## Highlights
@@ -56,15 +57,23 @@ This family covers action models conditioned on video/world-model features. A si
 Benchmark-specific setup, training, and evaluation instructions are maintained under `examples/`.
 
 - [LIBERO examples](examples/libero/LIBERO.md)
+- [RoboTwin 2.0 examples](examples/robotwin/RoboTwin.md)
 
 ## Model Zoo
 
-Pretrained LIBERO checkpoints are released on ModelScope:
+Pretrained checkpoints are released on ModelScope:
 [**panshaohua/starwam**](https://www.modelscope.cn/models/panshaohua/starwam).
+
+LIBERO:
 
 - `starwam-libero/mot/starwam_wan225b_mot.pt` — Wan2.2-TI2V-5B MoT WAM.
 - `starwam-libero/sharedit/starwam_wan225b_shareddit.pt` — Wan2.2-TI2V-5B Shared-DiT WAM.
 - `starwam-libero/action_stats.json` — shared action normalization stats for both checkpoints.
+
+RoboTwin 2.0:
+
+- `starwam-robotwin/mot/starwam_wan225b_robotwin_mot.pt` — Wan2.2-TI2V-5B dual-arm MoT WAM.
+- `starwam-robotwin/action_stats.json` — z-score action/state normalization stats.
 
 Download:
 
@@ -73,7 +82,7 @@ pip install modelscope
 modelscope download --model panshaohua/starwam --local_dir /path/to/starwam_ckpts
 ```
 
-See [LIBERO examples](examples/libero/LIBERO.md) for rollout commands that use these checkpoints.
+See [LIBERO examples](examples/libero/LIBERO.md) and [RoboTwin 2.0 examples](examples/robotwin/RoboTwin.md) for rollout commands that use these checkpoints.
 
 ## Roadmap
 

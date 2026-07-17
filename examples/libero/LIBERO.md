@@ -57,11 +57,11 @@ Wan2.2-TI2V-5B recipes. Values are copied from each recipe header.
 
 | Suite | MoT (`mot_wam`) | Shared-DiT (`shared_dit_wam`) | Feature-Conditioned (`feature_conditioned_action_model`) |
 | --- | --- | --- | --- |
-| libero_spatial | 96.2% | 94.2% | 90.8% |
-| libero_object | 99.0% | 100.0% | 95.8% |
-| libero_goal | 97.4% | 96.8% | 94.0% |
-| libero_10 | 93.8% | 96.2% | 81.2% |
-| Overall (micro) | 96.6% | 96.8% | 90.5% |
+| libero_spatial | 97.8% | 98.8% | 90.8% |
+| libero_object | 98.8% | 100.0% | 95.8% |
+| libero_goal | 97.2% | 97.4% | 94.0% |
+| libero_10 | 94.2% | 96.4% | 81.2% |
+| Overall (micro) | 97.0% | 98.2% | 90.5% |
 | Eval checkpoint | checkpoint-20000 | checkpoint-50000 | checkpoint-100000 |
 
 ### Download data and backbones

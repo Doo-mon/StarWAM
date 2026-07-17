@@ -9,16 +9,16 @@ set -euo pipefail
 
 REPO_DIR=${REPO_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}
 CONDA_SH=${CONDA_SH:-$HOME/anaconda3/etc/profile.d/conda.sh}
-CONDA_ENV=${CONDA_ENV:-vace-a800-0408}
+CONDA_ENV=${CONDA_ENV:-}
 RECIPE=${RECIPE:-examples/robotwin/configs/recipes/starwam_robotwin_mot_wan22_5b.yaml}
-BACKBONE=${BACKBONE:-/root/paddlejob/bosdata/guanjiazhi/pretrain_weights/hf_cache/Wan2.2-TI2V-5B}
-OUTPUT_DIR=${OUTPUT_DIR:-/root/paddlejob/robotwin-textcache}
+BACKBONE=${BACKBONE:?set BACKBONE=/path/to/Wan2.2-TI2V-5B}
+OUTPUT_DIR=${OUTPUT_DIR:?set OUTPUT_DIR=/path/to/text_embedding_cache}
 NUM_SHARDS=${NUM_SHARDS:-8}
 BATCH_SIZE=${BATCH_SIZE:-32}
 GPUS=${GPUS:-"0 1 2 3 4 5 6 7"}
 
 cd "$REPO_DIR"
-if [ -f "$CONDA_SH" ]; then
+if [ -n "$CONDA_ENV" ] && [ -f "$CONDA_SH" ]; then
   # shellcheck disable=SC1090
   source "$CONDA_SH"
   conda activate "$CONDA_ENV"

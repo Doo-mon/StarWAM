@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import torch
 
 from starwam.backbone.base import BaseBackbone, BackboneInfo
@@ -48,4 +50,49 @@ def build_backbone(
     )
 
 
-__all__ = ["BaseBackbone", "BackboneInfo", "Wan22Backbone", "build_backbone"]
+def build_text_encoder(
+    config: BackboneConfig,
+    *,
+    text_len: int,
+    device: str = "cpu",
+    dtype=None,
+    model_dir=None,
+):
+    """Build the standalone T5 text encoder matching ``config.type``.
+
+    Returns an object exposing ``encode(list[str]) -> (context, mask)``. Shared by
+    eval (``starwam.eval.policy``), training cache warm-up (``builder``), and the
+    precompute CLI so the Wan2.2 vs Cosmos-Predict2 dispatch lives in one place.
+    """
+    if dtype is None:
+        dtype = torch.bfloat16
+    if model_dir is None:
+        model_dir = config.pretrained_model_id
+    model_dir = Path(model_dir)
+
+    if config.type in WAN_BACKBONES:
+        from starwam.backbone.wan22 import Wan22TextEncoder
+
+        return Wan22TextEncoder(
+            ckpt_path=str(model_dir / "models_t5_umt5-xxl-enc-bf16.pth"),
+            tokenizer_path=str(model_dir / "google" / "umt5-xxl"),
+            text_len=text_len,
+            device=device,
+            dtype=dtype,
+        )
+    if config.type in COSMOS_PREDICT2_BACKBONES:
+        from starwam.backbone.cosmos_predict2 import CosmosPredict2TextEncoder
+
+        return CosmosPredict2TextEncoder(
+            model_dir=model_dir,
+            text_len=text_len,
+            device=device,
+            dtype=dtype,
+        )
+    raise ValueError(
+        f"Unknown StarWAM backbone type: {config.type}. "
+        f"Available: {sorted(WAN_BACKBONES | COSMOS_PREDICT2_BACKBONES)}"
+    )
+
+
+__all__ = ["BaseBackbone", "BackboneInfo", "Wan22Backbone", "build_backbone", "build_text_encoder"]
